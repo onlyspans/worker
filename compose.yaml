@@ -1,0 +1,7 @@
+﻿services:
+  onlyspans.worker.api:
+    image: onlyspans.worker.api
+    build:
+      context: .
+      dockerfile: Onlyspans.Worker.Api/Dockerfile
+
