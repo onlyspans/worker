@@ -1,7 +1,18 @@
+using Microsoft.EntityFrameworkCore;
+using Onlyspans.Worker.Api.Data;
+using Onlyspans.Worker.Api.Hosting;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddGrpc();
+
+// Add database
+builder.Services.AddDbContext<WorkerDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
+
+// Add migration hosted service
+builder.Services.AddHostedService<MigrationHostedService>();
 
 var app = builder.Build();
 
