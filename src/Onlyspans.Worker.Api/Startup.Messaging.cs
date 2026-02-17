@@ -1,35 +1,40 @@
 using Onlyspans.Worker.Api.Configuration;
+using Onlyspans.Worker.Api.Messages;
 using Onlyspans.Worker.Api.Services;
+using Wolverine;
+using Wolverine.Kafka;
 
 namespace Onlyspans.Worker.Api;
 
 public static class MessagingStartup
 {
-    /// <summary>
-    /// Registers messaging services.
-    /// Currently registers NoOpLogPublisher as a placeholder.
-    /// Phase 6 will replace this with Wolverine + Kafka (WolverineFx, Wolverine.Kafka).
-    /// </summary>
-    public static IServiceCollection AddMessaging(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    // Phase 6: Wolverine + Kafka integration with feature flag
+    // Wolverine UseKafka API: opts.UseKafka(bootstrapServers) — WolverineFx.Kafka 5.16.0
+    // Publish routing: opts.PublishMessage<T>().ToKafkaTopic(topicName)
+    public static WebApplicationBuilder AddMessaging(this WebApplicationBuilder builder)
     {
-        var options = configuration
+        var options = builder.Configuration
             .GetRequiredSection(MessagingOptions.SectionName)
             .Get<MessagingOptions>();
 
         if (options is { Enabled: true })
         {
-            // TODO Phase 6: Replace with Wolverine/Kafka publisher
-            // builder.UseWolverine(opts => {
-            //     opts.UseKafka(options.Kafka.BootstrapServers)
-            //         .ConfigureProducers(p => p.DefaultTopic = options.Kafka.Topic);
-            // });
+            builder.Host.UseWolverine(opts =>
+            {
+                opts.UseKafka(options.Kafka.BootstrapServers)
+                    .ConfigureProducers(p => p.ClientId = "worker-service");
+
+                opts.PublishMessage<DeploymentLogMessage>()
+                    .ToKafkaTopic(options.Kafka.Topic);
+            });
+
+            builder.Services.AddScoped<ILogPublisher, WolverineLogPublisher>();
+        }
+        else
+        {
+            builder.Services.AddSingleton<ILogPublisher, NoOpLogPublisher>();
         }
 
-        // Register NoOpLogPublisher for both enabled and disabled states until Phase 6
-        services.AddSingleton<ILogPublisher, NoOpLogPublisher>();
-
-        return services;
+        return builder;
     }
 }

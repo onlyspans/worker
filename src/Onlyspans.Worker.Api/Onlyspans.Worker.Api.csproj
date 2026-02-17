@@ -31,6 +31,8 @@
         <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
         <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
         <PackageReference Include="Strongly.Options" Version="1.0.0" />
+        <PackageReference Include="WolverineFx" Version="5.16.0" />
+        <PackageReference Include="WolverineFx.Kafka" Version="5.16.0" />
     </ItemGroup>
 
     <ItemGroup>
