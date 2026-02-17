@@ -7,7 +7,7 @@ builder.Host.AddSerilog();
 
 // Add services to the container
 builder.Services.AddDatabase(builder.Configuration);
-builder.Services.AddGrpcServices(builder.Environment);
+builder.Services.AddGrpcServices(builder.Environment, builder.Configuration);
 builder.Services.AddHealthz(builder.Configuration);
 builder.Services.AddMessaging(builder.Configuration);
 builder.Services.AddS3Services(builder.Configuration);
