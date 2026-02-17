@@ -34,8 +34,8 @@ public static partial class Startup
 
     public static WebApplication UseGrpcServices(this WebApplication app)
     {
-        // TODO: Phase 7 - Map WorkerService
-        // app.MapGrpcService<Services.WorkerService>();
+        // Phase 7: Map WorkerService
+        app.MapGrpcService<Services.WorkerService>();
 
         // Enable gRPC reflection in development for testing with grpcurl
         if (app.Environment.IsDevelopment())
