@@ -3,4 +3,5 @@
     <File Path="compose.yaml" />
   </Folder>
   <Project Path="src/Onlyspans.Worker.Api/Onlyspans.Worker.Api.csproj" />
+  <Project Path="tests/Onlyspans.Worker.Api.Tests/Onlyspans.Worker.Api.Tests.csproj" />
 </Solution>

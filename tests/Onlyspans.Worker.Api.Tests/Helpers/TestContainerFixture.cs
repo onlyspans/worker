@@ -4,7 +4,8 @@ using Testcontainers.PostgreSql;
 namespace Onlyspans.Worker.Api.Tests.Helpers;
 
 // Pattern: https://dotnet.testcontainers.org/
-// IAsyncLifetime for XUnit v2/v3 lifecycle management
+// IAsyncLifetime v3: inherits IAsyncDisposable — both methods return ValueTask
+// Migration ref: https://xunit.net/docs/getting-started/v3/migration
 public sealed class TestContainerFixture : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
@@ -13,7 +14,7 @@ public sealed class TestContainerFixture : IAsyncLifetime
 
     public string ConnectionString => _postgres.GetConnectionString();
 
-    public async Task InitializeAsync() => await _postgres.StartAsync();
+    public async ValueTask InitializeAsync() => await _postgres.StartAsync();
 
-    public async Task DisposeAsync() => await _postgres.DisposeAsync();
+    public async ValueTask DisposeAsync() => await _postgres.DisposeAsync();
 }
