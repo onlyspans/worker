@@ -2,6 +2,10 @@
   <Folder Name="/Solution Items/">
     <File Path="compose.yaml" />
   </Folder>
-  <Project Path="src/Onlyspans.Worker.Api/Onlyspans.Worker.Api.csproj" />
-  <Project Path="tests/Onlyspans.Worker.Api.Tests/Onlyspans.Worker.Api.Tests.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/Onlyspans.Worker.Api/Onlyspans.Worker.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Onlyspans.Worker.Api.Tests/Onlyspans.Worker.Api.Tests.csproj" />
+  </Folder>
 </Solution>
