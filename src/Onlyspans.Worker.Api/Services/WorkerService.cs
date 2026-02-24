@@ -1,20 +1,17 @@
+using Google.Protobuf;
 using Grpc.Core;
 using Onlyspans.Worker.Api.Clients;
 using Onlyspans.Worker.Api.Data;
 using Targets.Communication;
 using Worker.Communication;
 
-// Disambiguate proto DeploymentResult from EF entity DeploymentResult
 using ProtoDeploymentResult = Worker.Communication.DeploymentResult;
 using EntityDeploymentResult = Onlyspans.Worker.Api.Data.Entities.DeploymentResult;
 using EntityDeploymentLog = Onlyspans.Worker.Api.Data.Entities.DeploymentLog;
-// Disambiguate proto LogLevel from Microsoft.Extensions.Logging.LogLevel
 using ProtoLogLevel = Worker.Communication.LogLevel;
 
 namespace Onlyspans.Worker.Api.Services;
 
-// Base class generated from worker.proto: Worker.Communication.WorkerService.WorkerServiceBase
-// ExecuteDeployment signature: Task ExecuteDeployment(DeploymentPackage, IServerStreamWriter<DeploymentMessage>, ServerCallContext)
 public sealed class WorkerService(
     ISnapshotDownloader snapshotDownloader,
     ITargetsControllerClient targetsClient,
@@ -23,6 +20,8 @@ public sealed class WorkerService(
     ILogger<WorkerService> logger
 ) : global::Worker.Communication.WorkerService.WorkerServiceBase
 {
+    private const int ChunkSize = 64 * 1024; // 64 KB
+
     public override async Task ExecuteDeployment(
         DeploymentPackage request,
         IServerStreamWriter<DeploymentMessage> responseStream,
@@ -31,7 +30,7 @@ public sealed class WorkerService(
         var startedAt = DateTime.UtcNow;
         var ct = context.CancellationToken;
 
-        // Step 1: Download snapshot from S3
+        // Step 1: Download snapshot
         DownloadSnapshotResult snapshotResult;
         try
         {
@@ -43,7 +42,7 @@ public sealed class WorkerService(
                 "Failed to download snapshot {SnapshotKey} for deployment {DeploymentId}",
                 request.SnapshotKey, request.DeploymentId);
 
-            var errorMsg = new DeploymentMessage
+            await responseStream.WriteAsync(new DeploymentMessage
             {
                 Result = new ProtoDeploymentResult
                 {
@@ -54,27 +53,83 @@ public sealed class WorkerService(
                         Message = ex.Message
                     }
                 }
-            };
-            await responseStream.WriteAsync(errorMsg, ct);
+            }, ct);
             await SaveResultAsync(request.DeploymentId, "failed", startedAt, ex.Message, null, ct);
             return;
         }
 
-        // Step 2: Build request for Targets Controller
-        var targetRequest = new TargetExecutionRequest
-        {
-            DeploymentId = request.DeploymentId,
-            TargetId = request.TargetId,
-            TargetType = request.TargetType,
-            SnapshotPath = snapshotResult.FilePath
-        };
-        foreach (var kv in request.ResolvedVariables)
-            targetRequest.EnvironmentVariables[kv.Key] = kv.Value;
-
-        // Step 3: Stream execution results from Targets Controller
+        // Step 2: Open BiDi stream to Targets Controller
         string? finalError = null;
-        using var streamingCall = targetsClient.ExecuteOnTargetAsync(targetRequest, ct);
+        using var streamingCall = targetsClient.ExecuteOnTargetAsync(ct);
 
+        try
+        {
+            // Send metadata as first message
+            await streamingCall.RequestStream.WriteAsync(new DeploymentInput
+            {
+                Metadata = new DeploymentMetadata
+                {
+                    DeploymentId = request.DeploymentId,
+                    TargetId = request.TargetId,
+                    TargetType = request.TargetType,
+                    EnvironmentVariables = { request.ResolvedVariables }
+                }
+            }, ct);
+
+            // Stream snapshot file in chunks
+            var buffer = new byte[ChunkSize];
+            await using var fileStream = File.OpenRead(snapshotResult.FilePath);
+
+            int bytesRead;
+            while ((bytesRead = await fileStream.ReadAsync(buffer, ct)) > 0)
+            {
+                var isLast = fileStream.Position >= fileStream.Length;
+                await streamingCall.RequestStream.WriteAsync(new DeploymentInput
+                {
+                    SnapshotChunk = new SnapshotChunk
+                    {
+                        Data = ByteString.CopyFrom(buffer, 0, bytesRead),
+                        IsLast = isLast
+                    }
+                }, ct);
+            }
+
+            // Close request stream — signals TC that all chunks are sent
+            await streamingCall.RequestStream.CompleteAsync();
+
+            logger.LogInformation(
+                "Snapshot streamed to TC for deployment {DeploymentId} ({Bytes} bytes)",
+                request.DeploymentId, snapshotResult.SizeBytes);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "Failed to stream snapshot to TC for deployment {DeploymentId}",
+                request.DeploymentId);
+
+            await responseStream.WriteAsync(new DeploymentMessage
+            {
+                Result = new ProtoDeploymentResult
+                {
+                    Error = new ProtoDeploymentResult.Types.Error
+                    {
+                        DeploymentId = request.DeploymentId,
+                        ErrorType = ErrorType.SnapshotDownloadFailed,
+                        Message = ex.Message
+                    }
+                }
+            }, ct);
+            await SaveResultAsync(request.DeploymentId, "failed", startedAt, ex.Message, null, ct);
+            return;
+        }
+        finally
+        {
+            // Clean up temp file regardless of outcome
+            if (File.Exists(snapshotResult.FilePath))
+                File.Delete(snapshotResult.FilePath);
+        }
+
+        // Step 3: Stream execution results from TC back to Processes
         try
         {
             await foreach (var executionResult in streamingCall.ResponseStream.ReadAllAsync(ct))
@@ -88,13 +143,9 @@ public sealed class WorkerService(
                     Source = "target-controller"
                 };
 
-                // Stream log to gRPC response
                 await responseStream.WriteAsync(new DeploymentMessage { Log = logChunk }, ct);
-
-                // Publish to Kafka via Wolverine (or NoOp when disabled)
                 await logPublisher.PublishAsync(logChunk, ct);
 
-                // Persist log entry to database
                 dbContext.DeploymentLogs.Add(new EntityDeploymentLog
                 {
                     Id = Guid.NewGuid(),
@@ -117,13 +168,13 @@ public sealed class WorkerService(
             finalError = ex.Message;
         }
 
-        // Step 4: Save logs and send final result
+        // Step 4: Persist and send final result
         await dbContext.SaveChangesAsync(ct);
 
         var completedAt = DateTime.UtcNow;
         if (finalError is null)
         {
-            var successMsg = new DeploymentMessage
+            await responseStream.WriteAsync(new DeploymentMessage
             {
                 Result = new ProtoDeploymentResult
                 {
@@ -134,13 +185,12 @@ public sealed class WorkerService(
                         Summary = "Deployment completed successfully"
                     }
                 }
-            };
-            await responseStream.WriteAsync(successMsg, ct);
+            }, ct);
             await SaveResultAsync(request.DeploymentId, "succeeded", startedAt, null, completedAt, ct);
         }
         else
         {
-            var errorMsg = new DeploymentMessage
+            await responseStream.WriteAsync(new DeploymentMessage
             {
                 Result = new ProtoDeploymentResult
                 {
@@ -151,8 +201,7 @@ public sealed class WorkerService(
                         Message = finalError
                     }
                 }
-            };
-            await responseStream.WriteAsync(errorMsg, ct);
+            }, ct);
             await SaveResultAsync(request.DeploymentId, "failed", startedAt, finalError, completedAt, ct);
         }
     }

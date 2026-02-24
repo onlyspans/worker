@@ -5,7 +5,6 @@ namespace Onlyspans.Worker.Api.Clients;
 
 public interface ITargetsControllerClient
 {
-    AsyncServerStreamingCall<ExecutionResult> ExecuteOnTargetAsync(
-        TargetExecutionRequest request,
+    AsyncDuplexStreamingCall<DeploymentInput, ExecutionResult> ExecuteOnTargetAsync(
         CancellationToken cancellationToken);
 }

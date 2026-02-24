@@ -12,10 +12,9 @@ public sealed class TargetsControllerClient : ITargetsControllerClient
         _client = client;
     }
 
-    public AsyncServerStreamingCall<ExecutionResult> ExecuteOnTargetAsync(
-        TargetExecutionRequest request,
+    public AsyncDuplexStreamingCall<DeploymentInput, ExecutionResult> ExecuteOnTargetAsync(
         CancellationToken cancellationToken)
     {
-        return _client.ExecuteOnTarget(request, cancellationToken: cancellationToken);
+        return _client.ExecuteOnTarget(cancellationToken: cancellationToken);
     }
 }
