@@ -1,4 +1,3 @@
-using Google.Protobuf;
 using Grpc.Core;
 using Onlyspans.Worker.Api.Clients;
 using Onlyspans.Worker.Api.Data;
@@ -9,103 +8,92 @@ using ProtoDeploymentResult = Worker.Communication.DeploymentResult;
 using EntityDeploymentResult = Onlyspans.Worker.Api.Data.Entities.DeploymentResult;
 using EntityDeploymentLog = Onlyspans.Worker.Api.Data.Entities.DeploymentLog;
 using ProtoLogLevel = Worker.Communication.LogLevel;
+using WorkerDeploymentInput = Worker.Communication.DeploymentInput;
+using WorkerDeploymentMetadata = Worker.Communication.DeploymentMetadata;
+using WorkerSnapshotChunk = Worker.Communication.SnapshotChunk;
+using TCDeploymentInput = Targets.Communication.DeploymentInput;
+using TCDeploymentMetadata = Targets.Communication.DeploymentMetadata;
+using TCSnapshotChunk = Targets.Communication.SnapshotChunk;
 
 namespace Onlyspans.Worker.Api.Services;
 
 public sealed class WorkerService(
-    ISnapshotDownloader snapshotDownloader,
     ITargetsControllerClient targetsClient,
-    ILogPublisher logPublisher,
     WorkerDbContext dbContext,
     ILogger<WorkerService> logger
 ) : global::Worker.Communication.WorkerService.WorkerServiceBase
 {
-    private const int ChunkSize = 64 * 1024; // 64 KB
-
     public override async Task ExecuteDeployment(
-        DeploymentPackage request,
+        IAsyncStreamReader<WorkerDeploymentInput> requestStream,
         IServerStreamWriter<DeploymentMessage> responseStream,
         ServerCallContext context)
     {
         var startedAt = DateTime.UtcNow;
         var ct = context.CancellationToken;
 
-        // Step 1: Download snapshot
-        DownloadSnapshotResult snapshotResult;
-        try
+        // Step 1: Read first message — must be metadata
+        if (!await requestStream.MoveNext(ct) ||
+            requestStream.Current.InputCase != WorkerDeploymentInput.InputOneofCase.Metadata)
         {
-            snapshotResult = await snapshotDownloader.DownloadAsync(request.SnapshotKey, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex,
-                "Failed to download snapshot {SnapshotKey} for deployment {DeploymentId}",
-                request.SnapshotKey, request.DeploymentId);
-
             await responseStream.WriteAsync(new DeploymentMessage
             {
                 Result = new ProtoDeploymentResult
                 {
                     Error = new ProtoDeploymentResult.Types.Error
                     {
-                        DeploymentId = request.DeploymentId,
-                        ErrorType = ErrorType.SnapshotDownloadFailed,
-                        Message = ex.Message
+                        DeploymentId = "",
+                        ErrorType = ErrorType.Internal,
+                        Message = "First message must be DeploymentMetadata"
                     }
                 }
             }, ct);
-            await SaveResultAsync(request.DeploymentId, "failed", startedAt, ex.Message, null, ct);
             return;
         }
 
-        // Step 2: Open BiDi stream to Targets Controller
+        var meta = requestStream.Current.Metadata;
         string? finalError = null;
-        using var streamingCall = targetsClient.ExecuteOnTargetAsync(ct);
 
+        // Step 2: Open BiDi stream to Targets Controller and forward metadata + chunks
+        using var streamingCall = targetsClient.ExecuteOnTargetAsync(ct);
         try
         {
-            // Send metadata as first message
-            await streamingCall.RequestStream.WriteAsync(new DeploymentInput
+            await streamingCall.RequestStream.WriteAsync(new TCDeploymentInput
             {
-                Metadata = new DeploymentMetadata
+                Metadata = new TCDeploymentMetadata
                 {
-                    DeploymentId = request.DeploymentId,
-                    TargetId = request.TargetId,
-                    TargetType = request.TargetType,
-                    EnvironmentVariables = { request.ResolvedVariables }
+                    DeploymentId = meta.DeploymentId,
+                    TargetId = meta.TargetId,
+                    TargetType = meta.TargetType,
+                    EnvironmentVariables = { meta.ResolvedVariables }
                 }
             }, ct);
 
-            // Stream snapshot file in chunks
-            var buffer = new byte[ChunkSize];
-            await using var fileStream = File.OpenRead(snapshotResult.FilePath);
-
-            int bytesRead;
-            while ((bytesRead = await fileStream.ReadAsync(buffer, ct)) > 0)
+            await foreach (var msg in requestStream.ReadAllAsync(ct))
             {
-                var isLast = fileStream.Position >= fileStream.Length;
-                await streamingCall.RequestStream.WriteAsync(new DeploymentInput
+                if (msg.InputCase == WorkerDeploymentInput.InputOneofCase.SnapshotChunk)
                 {
-                    SnapshotChunk = new SnapshotChunk
+                    await streamingCall.RequestStream.WriteAsync(new TCDeploymentInput
                     {
-                        Data = ByteString.CopyFrom(buffer, 0, bytesRead),
-                        IsLast = isLast
-                    }
-                }, ct);
+                        SnapshotChunk = new TCSnapshotChunk
+                        {
+                            Data = msg.SnapshotChunk.Data,
+                            IsLast = msg.SnapshotChunk.IsLast
+                        }
+                    }, ct);
+                }
             }
 
-            // Close request stream — signals TC that all chunks are sent
             await streamingCall.RequestStream.CompleteAsync();
 
             logger.LogInformation(
-                "Snapshot streamed to TC for deployment {DeploymentId} ({Bytes} bytes)",
-                request.DeploymentId, snapshotResult.SizeBytes);
+                "Snapshot forwarded to TC for deployment {DeploymentId}",
+                meta.DeploymentId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex,
                 "Failed to stream snapshot to TC for deployment {DeploymentId}",
-                request.DeploymentId);
+                meta.DeploymentId);
 
             await responseStream.WriteAsync(new DeploymentMessage
             {
@@ -113,20 +101,14 @@ public sealed class WorkerService(
                 {
                     Error = new ProtoDeploymentResult.Types.Error
                     {
-                        DeploymentId = request.DeploymentId,
-                        ErrorType = ErrorType.SnapshotDownloadFailed,
+                        DeploymentId = meta.DeploymentId,
+                        ErrorType = ErrorType.Internal,
                         Message = ex.Message
                     }
                 }
             }, ct);
-            await SaveResultAsync(request.DeploymentId, "failed", startedAt, ex.Message, null, ct);
+            await SaveResultAsync(meta.DeploymentId, "failed", startedAt, ex.Message, null, ct);
             return;
-        }
-        finally
-        {
-            // Clean up temp file regardless of outcome
-            if (File.Exists(snapshotResult.FilePath))
-                File.Delete(snapshotResult.FilePath);
         }
 
         // Step 3: Stream execution results from TC back to Processes
@@ -136,7 +118,7 @@ public sealed class WorkerService(
             {
                 var logChunk = new LogChunk
                 {
-                    DeploymentId = request.DeploymentId,
+                    DeploymentId = meta.DeploymentId,
                     Timestamp = executionResult.Timestamp,
                     Level = MapResultTypeToLogLevel(executionResult.Type),
                     Message = executionResult.Message,
@@ -144,12 +126,11 @@ public sealed class WorkerService(
                 };
 
                 await responseStream.WriteAsync(new DeploymentMessage { Log = logChunk }, ct);
-                await logPublisher.PublishAsync(logChunk, ct);
 
                 dbContext.DeploymentLogs.Add(new EntityDeploymentLog
                 {
                     Id = Guid.NewGuid(),
-                    DeploymentId = request.DeploymentId,
+                    DeploymentId = meta.DeploymentId,
                     Timestamp = DateTime.UtcNow,
                     LogLevel = logChunk.Level.ToString(),
                     Message = logChunk.Message,
@@ -164,7 +145,7 @@ public sealed class WorkerService(
         {
             logger.LogError(ex,
                 "Target execution stream failed for deployment {DeploymentId}",
-                request.DeploymentId);
+                meta.DeploymentId);
             finalError = ex.Message;
         }
 
@@ -180,13 +161,13 @@ public sealed class WorkerService(
                 {
                     Success = new ProtoDeploymentResult.Types.Success
                     {
-                        DeploymentId = request.DeploymentId,
+                        DeploymentId = meta.DeploymentId,
                         CompletedAt = new DateTimeOffset(completedAt).ToUnixTimeMilliseconds(),
                         Summary = "Deployment completed successfully"
                     }
                 }
             }, ct);
-            await SaveResultAsync(request.DeploymentId, "succeeded", startedAt, null, completedAt, ct);
+            await SaveResultAsync(meta.DeploymentId, "succeeded", startedAt, null, completedAt, ct);
         }
         else
         {
@@ -196,13 +177,13 @@ public sealed class WorkerService(
                 {
                     Error = new ProtoDeploymentResult.Types.Error
                     {
-                        DeploymentId = request.DeploymentId,
+                        DeploymentId = meta.DeploymentId,
                         ErrorType = ErrorType.TargetExecutionFailed,
                         Message = finalError
                     }
                 }
             }, ct);
-            await SaveResultAsync(request.DeploymentId, "failed", startedAt, finalError, completedAt, ct);
+            await SaveResultAsync(meta.DeploymentId, "failed", startedAt, finalError, completedAt, ct);
         }
     }
 

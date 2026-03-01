@@ -9,8 +9,6 @@ builder.Host.AddSerilog();
 builder.Services.AddDatabase(builder.Configuration);
 builder.Services.AddGrpcServices(builder.Environment, builder.Configuration);
 builder.Services.AddHealthz(builder.Configuration);
-builder.AddMessaging();
-builder.Services.AddS3Services(builder.Configuration);
 
 var app = builder.Build();
 

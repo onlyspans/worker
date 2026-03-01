@@ -9,8 +9,31 @@ option csharp_namespace = "Worker.Communication";
 // Error handling pattern copied from: /variables/src/Onlyspans.Variables.Api/gRPC/Protos/variables.proto (lines 22-48)
 service WorkerService {
   // Called by Processes to execute deployment on target
-  // Returns server stream of deployment messages (logs during execution, final result at end)
-  rpc ExecuteDeployment(DeploymentPackage) returns (stream DeploymentMessage);
+  // BiDi stream: Processes sends metadata + snapshot chunks, Worker streams logs/result back
+  // Protocol: first message must be DeploymentMetadata, then one or more SnapshotChunk messages
+  rpc ExecuteDeployment(stream DeploymentInput) returns (stream DeploymentMessage);
+}
+
+// Streamed from Processes to Worker
+message DeploymentInput {
+  oneof input {
+    DeploymentMetadata metadata = 1;   // first message
+    SnapshotChunk snapshot_chunk = 2;  // subsequent messages
+  }
+}
+
+message DeploymentMetadata {
+  string deployment_id = 1;
+  string project_id = 2;
+  string environment_id = 3;
+  string target_id = 4;
+  map<string, string> resolved_variables = 5;  // Pre-resolved by Processes (includes secrets)
+  string target_type = 6;  // "ssh", "kubernetes", etc.
+}
+
+message SnapshotChunk {
+  bytes data = 1;
+  bool is_last = 2;
 }
 
 // Streaming response message - can be either a log chunk OR final result
@@ -20,18 +43,6 @@ message DeploymentMessage {
     LogChunk log = 1;
     DeploymentResult result = 2;
   }
-}
-
-// Deployment package received from Processes service
-// Contains pre-resolved variables (secrets already resolved by Processes)
-message DeploymentPackage {
-  string deployment_id = 1;
-  string project_id = 2;
-  string environment_id = 3;
-  string target_id = 4;
-  string snapshot_key = 5;  // S3 key for deployment snapshot
-  map<string, string> resolved_variables = 6;  // Pre-resolved by Processes (includes secrets)
-  string target_type = 7;  // "ssh", "kubernetes", etc.
 }
 
 // Log chunk streamed to Processes during deployment
