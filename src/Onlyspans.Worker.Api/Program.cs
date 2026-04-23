@@ -2,17 +2,14 @@ using Onlyspans.Worker.Api;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add Serilog logging
 builder.Host.AddSerilog();
 
-// Add services to the container
 builder.Services.AddDatabase(builder.Configuration);
 builder.Services.AddGrpcServices(builder.Environment, builder.Configuration);
 builder.Services.AddHealthz(builder.Configuration);
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
 app.UseGrpcServices();
 app.UseHealthz();
 

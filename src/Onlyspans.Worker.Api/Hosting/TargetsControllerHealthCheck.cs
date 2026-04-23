@@ -3,8 +3,6 @@ using Onlyspans.Worker.Api.Configuration;
 
 namespace Onlyspans.Worker.Api.Hosting;
 
-// Custom health check that verifies TCP reachability of the Targets Controller gRPC endpoint
-// Pattern: IHealthCheck from https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks
 public sealed class TargetsControllerHealthCheck(TargetsControllerOptions options) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(

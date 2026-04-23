@@ -5,16 +5,15 @@ package targets;
 option csharp_namespace = "Targets.Communication";
 
 service TargetsService {
-  // BiDi stream: Worker sends metadata + snapshot chunks, TC streams execution results back.
-  // Protocol: first message must be DeploymentMetadata, then one or more SnapshotChunk messages.
+  
+  
   rpc ExecuteOnTarget(stream DeploymentInput) returns (stream ExecutionResult);
 }
 
-// Streamed from Worker to TC
 message DeploymentInput {
   oneof payload {
-    DeploymentMetadata metadata = 1;    // must be first message
-    SnapshotChunk snapshot_chunk = 2;   // subsequent messages
+    DeploymentMetadata metadata = 1;    
+    SnapshotChunk snapshot_chunk = 2;   
   }
 }
 
@@ -30,7 +29,6 @@ message SnapshotChunk {
   bool is_last = 2;
 }
 
-// Streamed from TC to Worker
 message ExecutionResult {
   string deployment_id = 1;
   int64 timestamp = 2;

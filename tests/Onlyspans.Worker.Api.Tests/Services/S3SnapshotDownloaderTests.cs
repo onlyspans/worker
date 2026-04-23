@@ -22,15 +22,15 @@ public sealed class S3SnapshotDownloaderTests
     [Fact]
     public async Task DownloadAsync_NoSuchKey_ThrowsSnapshotNotFoundException()
     {
-        // Arrange
+        
         var s3Ex = new AmazonS3Exception("Not found") { ErrorCode = "NoSuchKey" };
         _s3Client.GetObjectAsync(Arg.Any<Amazon.S3.Model.GetObjectRequest>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(s3Ex);
 
-        // Act
+        
         var act = () => _sut.DownloadAsync("missing-key", CancellationToken.None);
 
-        // Assert
+        
         await act.Should().ThrowAsync<SnapshotNotFoundException>()
             .WithMessage("*missing-key*");
     }
@@ -38,15 +38,15 @@ public sealed class S3SnapshotDownloaderTests
     [Fact]
     public async Task DownloadAsync_AccessDenied_ThrowsSnapshotAccessDeniedException()
     {
-        // Arrange
+        
         var s3Ex = new AmazonS3Exception("Access Denied") { ErrorCode = "AccessDenied" };
         _s3Client.GetObjectAsync(Arg.Any<Amazon.S3.Model.GetObjectRequest>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(s3Ex);
 
-        // Act
+        
         var act = () => _sut.DownloadAsync("restricted-key", CancellationToken.None);
 
-        // Assert
+        
         await act.Should().ThrowAsync<SnapshotAccessDeniedException>()
             .WithMessage("*restricted-key*");
     }

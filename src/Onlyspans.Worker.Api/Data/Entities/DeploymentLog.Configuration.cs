@@ -26,7 +26,7 @@ public class DeploymentLogConfiguration : IEntityTypeConfiguration<DeploymentLog
         builder.Property(dl => dl.Source)
             .HasMaxLength(256);
 
-        // Indexes for common queries
+        
         builder.HasIndex(dl => dl.DeploymentId);
         builder.HasIndex(dl => dl.Timestamp);
         builder.HasIndex(dl => new { dl.DeploymentId, dl.Timestamp });

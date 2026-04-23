@@ -15,7 +15,7 @@ public class SnakeCaseNamingConvention : IEntityTypeAddedConvention, IPropertyAd
         var entityType = entityTypeBuilder.Metadata;
         var clrType = entityType.ClrType;
 
-        // Set table name to snake_case
+        
         if (clrType != null)
         {
             entityType.Builder.ToTable(ToSnakeCase(clrType.Name));
@@ -26,7 +26,7 @@ public class SnakeCaseNamingConvention : IEntityTypeAddedConvention, IPropertyAd
         IConventionPropertyBuilder propertyBuilder,
         IConventionContext<IConventionPropertyBuilder> context)
     {
-        // Set column name to snake_case
+        
         var property = propertyBuilder.Metadata;
         property.Builder.HasColumnName(ToSnakeCase(property.Name));
     }

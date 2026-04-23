@@ -32,7 +32,7 @@ public static partial class Startup
 
     public static WebApplication UseHealthz(this WebApplication app)
     {
-        // HTTP metrics middleware (prometheus-net.AspNetCore) - must be before routing
+        
         app.UseHttpMetrics();
 
         app.MapHealthChecks("/health");
@@ -41,7 +41,7 @@ public static partial class Startup
             Predicate = check => check.Tags.Contains("ready")
         });
 
-        // Prometheus /metrics scrape endpoint
+        
         app.MapMetrics();
 
         return app;

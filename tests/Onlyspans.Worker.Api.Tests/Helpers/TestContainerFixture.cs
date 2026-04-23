@@ -3,9 +3,6 @@ using Testcontainers.PostgreSql;
 
 namespace Onlyspans.Worker.Api.Tests.Helpers;
 
-// Pattern: https://dotnet.testcontainers.org/
-// IAsyncLifetime v3: inherits IAsyncDisposable — both methods return ValueTask
-// Migration ref: https://xunit.net/docs/getting-started/v3/migration
 public sealed class TestContainerFixture : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()

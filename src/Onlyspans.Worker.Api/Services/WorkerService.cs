@@ -31,7 +31,7 @@ public sealed class WorkerService(
         var startedAt = DateTime.UtcNow;
         var ct = context.CancellationToken;
 
-        // Step 1: Read first message — must be metadata
+        
         if (!await requestStream.MoveNext(ct) ||
             requestStream.Current.InputCase != WorkerDeploymentInput.InputOneofCase.Metadata)
         {
@@ -53,7 +53,7 @@ public sealed class WorkerService(
         var meta = requestStream.Current.Metadata;
         string? finalError = null;
 
-        // Step 2: Open BiDi stream to Targets Controller and forward metadata + chunks
+        
         using var streamingCall = targetsClient.ExecuteOnTargetAsync(ct);
         try
         {
@@ -111,7 +111,7 @@ public sealed class WorkerService(
             return;
         }
 
-        // Step 3: Stream execution results from TC back to Processes
+        
         try
         {
             await foreach (var executionResult in streamingCall.ResponseStream.ReadAllAsync(ct))
@@ -149,7 +149,7 @@ public sealed class WorkerService(
             finalError = ex.Message;
         }
 
-        // Step 4: Persist and send final result
+        
         await dbContext.SaveChangesAsync(ct);
 
         var completedAt = DateTime.UtcNow;

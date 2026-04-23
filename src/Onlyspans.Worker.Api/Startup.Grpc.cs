@@ -10,14 +10,14 @@ public static partial class Startup
     {
         services.AddGrpc();
 
-        // Enable gRPC reflection in development for testing with grpcurl
+        
         if (environment.IsDevelopment())
         {
             services.AddGrpcReflection();
         }
 
-        // Phase 5: Register gRPC client for Targets Controller
-        // Pattern: https://learn.microsoft.com/en-us/aspnet/core/grpc/clientfactory
+        
+        
         var targetsOptions = configuration
             .GetRequiredSection(TargetsControllerOptions.SectionName)
             .Get<TargetsControllerOptions>()!;
@@ -34,10 +34,10 @@ public static partial class Startup
 
     public static WebApplication UseGrpcServices(this WebApplication app)
     {
-        // Phase 7: Map WorkerService
+        
         app.MapGrpcService<Services.WorkerService>();
 
-        // Enable gRPC reflection in development for testing with grpcurl
+        
         if (app.Environment.IsDevelopment())
         {
             app.MapGrpcReflectionService();

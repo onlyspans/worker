@@ -15,7 +15,7 @@ public class WorkerDbContext(DbContextOptions<WorkerDbContext> options) : DbCont
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
-        // Configure snake_case naming convention for PostgreSQL
+        
         configurationBuilder.Conventions.Add(_ => new SnakeCaseNamingConvention());
     }
 }

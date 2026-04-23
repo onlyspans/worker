@@ -24,7 +24,7 @@ public class DeploymentResultConfiguration : IEntityTypeConfiguration<Deployment
 
         builder.Property(dr => dr.ErrorMessage);
 
-        // Index for status queries
+        
         builder.HasIndex(dr => dr.Status);
         builder.HasIndex(dr => dr.StartedAt);
     }

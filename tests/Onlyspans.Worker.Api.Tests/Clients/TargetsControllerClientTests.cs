@@ -11,7 +11,7 @@ public sealed class TargetsControllerClientTests
     [Fact]
     public void ExecuteOnTargetAsync_DelegatesToGeneratedGrpcClient()
     {
-        // Arrange
+        
         var generatedClient = Substitute.For<TargetsService.TargetsServiceClient>();
         var sut = new TargetsControllerClient(generatedClient);
 
@@ -23,7 +23,7 @@ public sealed class TargetsControllerClientTests
             SnapshotPath = "/tmp/snapshot"
         };
 
-        // AsyncServerStreamingCall constructor: (responseStream, responseHeadersAsync, getStatusFunc, getTrailersFunc, disposeAction)
+        
         var fakeCall = new AsyncServerStreamingCall<ExecutionResult>(
             Substitute.For<IAsyncStreamReader<ExecutionResult>>(),
             Task.FromResult(new Metadata()),
@@ -38,10 +38,10 @@ public sealed class TargetsControllerClientTests
                 Arg.Any<CancellationToken>())
             .Returns(fakeCall);
 
-        // Act
+        
         var result = sut.ExecuteOnTargetAsync(request, CancellationToken.None);
 
-        // Assert
+        
         result.Should().NotBeNull();
         generatedClient.Received(1).ExecuteOnTarget(
             Arg.Is<TargetExecutionRequest>(r => r.DeploymentId == "deploy-1"),

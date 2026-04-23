@@ -6,7 +6,6 @@ using Onlyspans.Worker.Api.Tests.Helpers;
 
 namespace Onlyspans.Worker.Api.Tests.Integration;
 
-// Integration tests using TestContainers PostgreSQL (no in-memory database per anti-pattern guard)
 [Collection("Database")]
 public sealed class DatabaseTests(TestContainerFixture fixture) : IClassFixture<TestContainerFixture>
 {
@@ -21,11 +20,11 @@ public sealed class DatabaseTests(TestContainerFixture fixture) : IClassFixture<
     [Fact]
     public async Task Migrations_ApplySuccessfully()
     {
-        // Arrange + Act
+        
         await using var context = CreateContext();
         await context.Database.MigrateAsync();
 
-        // Assert - tables exist after migration
+        
         var deploymentLogCount = await context.DeploymentLogs.CountAsync();
         var deploymentResultCount = await context.DeploymentResults.CountAsync();
 
@@ -36,7 +35,7 @@ public sealed class DatabaseTests(TestContainerFixture fixture) : IClassFixture<
     [Fact]
     public async Task DeploymentLog_CanSaveAndQuery()
     {
-        // Arrange
+        
         await using var context = CreateContext();
         await context.Database.MigrateAsync();
 
@@ -50,11 +49,11 @@ public sealed class DatabaseTests(TestContainerFixture fixture) : IClassFixture<
             Source = "worker"
         };
 
-        // Act
+        
         context.DeploymentLogs.Add(log);
         await context.SaveChangesAsync();
 
-        // Assert
+        
         var saved = await context.DeploymentLogs
             .Where(l => l.DeploymentId == "test-deploy-1")
             .FirstOrDefaultAsync();
@@ -67,7 +66,7 @@ public sealed class DatabaseTests(TestContainerFixture fixture) : IClassFixture<
     [Fact]
     public async Task DeploymentResult_CanSaveAndQuery()
     {
-        // Arrange
+        
         await using var context = CreateContext();
         await context.Database.MigrateAsync();
 
@@ -79,11 +78,11 @@ public sealed class DatabaseTests(TestContainerFixture fixture) : IClassFixture<
             CompletedAt = DateTime.UtcNow
         };
 
-        // Act
+        
         context.DeploymentResults.Add(result);
         await context.SaveChangesAsync();
 
-        // Assert
+        
         var saved = await context.DeploymentResults
             .Where(r => r.DeploymentId == "test-deploy-2")
             .FirstOrDefaultAsync();

@@ -5,10 +5,10 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Onlyspans.Worker.Api.Data.Migrations
 {
-    /// <inheritdoc />
+    
     public partial class InitialCreate : Migration
     {
-        /// <inheritdoc />
+        
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
@@ -68,7 +68,7 @@ namespace Onlyspans.Worker.Api.Data.Migrations
                 column: "status");
         }
 
-        /// <inheritdoc />
+        
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(

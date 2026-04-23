@@ -9,8 +9,6 @@ using Onlyspans.Worker.Api.Services;
 
 namespace Onlyspans.Worker.Api.Tests.Helpers;
 
-// Pattern: WebApplicationFactory for integration testing with TestContainers PostgreSQL
-// NSubstitute is used for mocking (not Moq per anti-pattern guard)
 public sealed class WorkerWebApplicationFactory(string connectionString)
     : WebApplicationFactory<Program>
 {
@@ -18,7 +16,7 @@ public sealed class WorkerWebApplicationFactory(string connectionString)
     {
         builder.ConfigureServices(services =>
         {
-            // Replace DbContext with TestContainers connection
+            
             var dbContextDescriptor = services.SingleOrDefault(
                 d => d.ServiceType == typeof(DbContextOptions<WorkerDbContext>));
             if (dbContextDescriptor is not null)
@@ -27,7 +25,7 @@ public sealed class WorkerWebApplicationFactory(string connectionString)
             services.AddDbContext<WorkerDbContext>(options =>
                 options.UseNpgsql(connectionString));
 
-            // Replace ITargetsControllerClient with NSubstitute mock
+            
             var targetClientDescriptor = services.SingleOrDefault(
                 d => d.ServiceType == typeof(ITargetsControllerClient));
             if (targetClientDescriptor is not null)
@@ -36,7 +34,7 @@ public sealed class WorkerWebApplicationFactory(string connectionString)
             services.AddScoped<ITargetsControllerClient>(
                 _ => Substitute.For<ITargetsControllerClient>());
 
-            // Replace ISnapshotDownloader with NSubstitute mock
+            
             var snapshotDescriptor = services.SingleOrDefault(
                 d => d.ServiceType == typeof(ISnapshotDownloader));
             if (snapshotDescriptor is not null)
