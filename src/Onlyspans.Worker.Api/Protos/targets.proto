@@ -5,26 +5,44 @@ package targets;
 option csharp_namespace = "Targets.Communication";
 
 service TargetsService {
-  
-  
   rpc ExecuteOnTarget(stream DeploymentInput) returns (stream ExecutionResult);
 }
 
 message DeploymentInput {
   oneof payload {
-    DeploymentMetadata metadata = 1;    
-    SnapshotChunk snapshot_chunk = 2;   
+    StepTargetMetadata metadata = 1;
+    ArtifactChunk artifact_chunk = 2;
   }
 }
 
-message DeploymentMetadata {
+message StepTargetMetadata {
   string deployment_id = 1;
-  string target_id = 2;
-  string target_type = 3;
-  map<string, string> environment_variables = 4;
+  string step_id = 2;
+  string step_name = 3;
+  string target_id = 4;
+  StepCommand command = 5;
+  map<string, string> environment_variables = 6;
 }
 
-message SnapshotChunk {
+message StepCommand {
+  CommandType type = 1;
+  int32 timeout_seconds = 2;
+  string working_directory = 3;
+
+  oneof source {
+    string inline_script = 10;
+    string script_path = 11;
+  }
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  COMMAND_TYPE_SHELL = 1;
+  COMMAND_TYPE_KUBERNETES = 2;
+  COMMAND_TYPE_HELM = 3;
+}
+
+message ArtifactChunk {
   bytes data = 1;
   bool is_last = 2;
 }

@@ -1,5 +1,4 @@
 using Onlyspans.Worker.Api.Configuration;
-using Onlyspans.Worker.Api.Data;
 using Onlyspans.Worker.Api.Hosting;
 using Prometheus;
 
@@ -16,13 +15,6 @@ public static partial class Startup
         services.AddSingleton(targetsOptions);
 
         services.AddHealthChecks()
-            .AddNpgSql(
-                connectionString: configuration.GetConnectionString("Database")!,
-                name: "database",
-                tags: ["ready"])
-            .AddDbContextCheck<WorkerDbContext>(
-                name: "ef-migrations",
-                tags: ["ready"])
             .AddCheck<TargetsControllerHealthCheck>(
                 name: "targets-controller",
                 tags: ["ready"]);

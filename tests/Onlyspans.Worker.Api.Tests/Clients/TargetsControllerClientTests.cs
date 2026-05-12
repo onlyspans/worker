@@ -11,20 +11,12 @@ public sealed class TargetsControllerClientTests
     [Fact]
     public void ExecuteOnTargetAsync_DelegatesToGeneratedGrpcClient()
     {
-        
         var generatedClient = Substitute.For<TargetsService.TargetsServiceClient>();
         var sut = new TargetsControllerClient(generatedClient);
+        using var cts = new CancellationTokenSource();
 
-        var request = new TargetExecutionRequest
-        {
-            DeploymentId = "deploy-1",
-            TargetId = "target-1",
-            TargetType = "ssh",
-            SnapshotPath = "/tmp/snapshot"
-        };
-
-        
-        var fakeCall = new AsyncServerStreamingCall<ExecutionResult>(
+        var fakeCall = new AsyncDuplexStreamingCall<DeploymentInput, ExecutionResult>(
+            Substitute.For<IClientStreamWriter<DeploymentInput>>(),
             Substitute.For<IAsyncStreamReader<ExecutionResult>>(),
             Task.FromResult(new Metadata()),
             () => Status.DefaultSuccess,
@@ -32,21 +24,17 @@ public sealed class TargetsControllerClientTests
             () => { });
 
         generatedClient.ExecuteOnTarget(
-                Arg.Is<TargetExecutionRequest>(r => r.DeploymentId == "deploy-1"),
                 Arg.Any<Metadata>(),
                 Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
+                cts.Token)
             .Returns(fakeCall);
 
-        
-        var result = sut.ExecuteOnTargetAsync(request, CancellationToken.None);
+        var result = sut.ExecuteOnTargetAsync(cts.Token);
 
-        
         result.Should().NotBeNull();
         generatedClient.Received(1).ExecuteOnTarget(
-            Arg.Is<TargetExecutionRequest>(r => r.DeploymentId == "deploy-1"),
             Arg.Any<Metadata>(),
             Arg.Any<DateTime?>(),
-            Arg.Any<CancellationToken>());
+            cts.Token);
     }
 }

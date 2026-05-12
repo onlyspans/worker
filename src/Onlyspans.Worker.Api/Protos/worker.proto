@@ -5,46 +5,69 @@ package worker;
 option csharp_namespace = "Worker.Communication";
 
 service WorkerService {
-  
-  
-  
-  rpc ExecuteDeployment(stream DeploymentInput) returns (stream DeploymentMessage);
+  rpc ExecuteStep(stream StepExecutionInput) returns (stream StepExecutionMessage);
 }
 
-message DeploymentInput {
+message StepExecutionInput {
   oneof input {
-    DeploymentMetadata metadata = 1;   
-    SnapshotChunk snapshot_chunk = 2;  
+    StepExecutionMetadata metadata = 1;
+    ArtifactChunk artifact_chunk = 2;
   }
 }
 
-message DeploymentMetadata {
+message StepExecutionMetadata {
   string deployment_id = 1;
-  string project_id = 2;
-  string environment_id = 3;
-  string target_id = 4;
-  map<string, string> resolved_variables = 5;  
-  string target_type = 6;  
+  string process_id = 2;
+
+  string step_id = 3;
+  string step_name = 4;
+  int32 step_order = 5;
+
+  string project_id = 6;
+  string environment_id = 7;
+  string target_id = 8;
+
+  StepCommand command = 9;
+  map<string, string> resolved_variables = 10;
 }
 
-message SnapshotChunk {
+message StepCommand {
+  CommandType type = 1;
+  int32 timeout_seconds = 2;
+  string working_directory = 3;
+
+  oneof source {
+    string inline_script = 10;
+    string script_path = 11;
+  }
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  COMMAND_TYPE_SHELL = 1;
+  COMMAND_TYPE_KUBERNETES = 2;
+  COMMAND_TYPE_HELM = 3;
+}
+
+message ArtifactChunk {
   bytes data = 1;
   bool is_last = 2;
 }
 
-message DeploymentMessage {
+message StepExecutionMessage {
   oneof message {
     LogChunk log = 1;
-    DeploymentResult result = 2;
+    StepExecutionResult result = 2;
   }
 }
 
 message LogChunk {
   string deployment_id = 1;
-  int64 timestamp = 2;  
-  LogLevel level = 3;
-  string message = 4;
-  optional string source = 5;  
+  string step_id = 2;
+  int64 timestamp = 3;
+  LogLevel level = 4;
+  string message = 5;
+  optional string source = 6;
 }
 
 enum LogLevel {
@@ -55,21 +78,22 @@ enum LogLevel {
   LOG_LEVEL_ERROR = 4;
 }
 
-message DeploymentResult {
+message StepExecutionResult {
   message Success {
     string deployment_id = 1;
-    int64 completed_at = 2;  
-    string summary = 3;
+    string step_id = 2;
+    int64 completed_at = 3;
+    string summary = 4;
   }
 
   message Error {
     string deployment_id = 1;
-    ErrorType error_type = 2;
-    string message = 3;
-    optional string trace = 4;  
+    string step_id = 2;
+    ErrorType error_type = 3;
+    string message = 4;
+    optional string trace = 5;
   }
 
-  
   oneof result {
     Success success = 1;
     Error error = 2;
@@ -78,7 +102,8 @@ message DeploymentResult {
 
 enum ErrorType {
   ERROR_TYPE_UNSPECIFIED = 0;
-  ERROR_TYPE_SNAPSHOT_DOWNLOAD_FAILED = 1;
+  ERROR_TYPE_ARTIFACT_TRANSFER_FAILED = 1;
   ERROR_TYPE_TARGET_EXECUTION_FAILED = 2;
-  ERROR_TYPE_INTERNAL = 3;
+  ERROR_TYPE_INVALID_STEP_PACKAGE = 3;
+  ERROR_TYPE_INTERNAL = 4;
 }
