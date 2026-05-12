@@ -14,6 +14,7 @@ using TCResultType = Targets.Communication.ResultType;
 using WorkerArtifactChunk = Worker.Communication.ArtifactChunk;
 using WorkerCommandType = Worker.Communication.CommandType;
 using WorkerErrorType = Worker.Communication.ErrorType;
+using WorkerLogLevel = Worker.Communication.LogLevel;
 using WorkerStepCommand = Worker.Communication.StepCommand;
 
 namespace Onlyspans.Worker.Api.Tests.Services;
@@ -223,6 +224,41 @@ public sealed class WorkerServiceTests
         response.Writes.Last().Result.Error.DeploymentId.Should().Be("deploy-1");
         response.Writes.Last().Result.Error.StepId.Should().Be("step-1");
         response.Writes.Last().Result.Error.Message.Should().Be("target failed");
+    }
+
+    [Fact]
+    public async Task ExecuteStep_WhenTargetErrors_StopsReadingFurtherTargetMessages()
+    {
+        var (targetCall, _) = CreateTargetCall(
+            new ExecutionResult
+            {
+                Type = TCResultType.Error,
+                Timestamp = 123,
+                Message = "target failed"
+            },
+            new ExecutionResult
+            {
+                Type = TCResultType.Log,
+                Timestamp = 124,
+                Message = "should not be forwarded"
+            },
+            SuccessResult("should not complete"));
+        var targetsClient = Substitute.For<ITargetsControllerClient>();
+        targetsClient.ExecuteOnTargetAsync(Arg.Any<CancellationToken>()).Returns(targetCall);
+        var sut = CreateSut(targetsClient);
+        var response = new TestServerStreamWriter<StepExecutionMessage>();
+
+        await sut.ExecuteStep(
+            new TestAsyncStreamReader<StepExecutionInput>([
+                MetadataInput(CreateMetadata())
+            ]),
+            response,
+            new TestServerCallContext());
+
+        response.Writes.Should().HaveCount(2);
+        response.Writes[0].Log.Level.Should().Be(WorkerLogLevel.Error);
+        response.Writes[0].Log.Message.Should().Be("target failed");
+        response.Writes[1].Result.Error.Message.Should().Be("target failed");
     }
 
     private static SUTWorkerService CreateSut(ITargetsControllerClient targetsClient)

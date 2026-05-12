@@ -129,7 +129,12 @@ public sealed class WorkerService(
                 {
                     case TCResultType.Error:
                         finalError = targetMessage.Message;
-                        await WriteLogAsync(responseStream, metadata, targetMessage, ProtoLogLevel.Error, ct);
+                        await WriteLogAsync(
+                            responseStream,
+                            metadata,
+                            targetMessage,
+                            MapResultTypeToLogLevel(targetMessage.Type),
+                            ct);
                         break;
                     case TCResultType.Success:
                         successSummary = string.IsNullOrWhiteSpace(targetMessage.Message)
@@ -144,6 +149,11 @@ public sealed class WorkerService(
                             MapResultTypeToLogLevel(targetMessage.Type),
                             ct);
                         break;
+                }
+
+                if (finalError is not null)
+                {
+                    break;
                 }
             }
         }
