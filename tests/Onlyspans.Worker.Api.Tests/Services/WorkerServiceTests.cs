@@ -60,6 +60,27 @@ public sealed class WorkerServiceTests
     }
 
     [Fact]
+    public async Task ExecuteStep_WhenExecutionIdIsMissing_ReturnsInvalidStepPackage()
+    {
+        var targetsClient = Substitute.For<ITargetsControllerClient>();
+        var sut = CreateSut(targetsClient);
+        var response = new TestServerStreamWriter<StepExecutionMessage>();
+        var metadata = CreateMetadata();
+        metadata.ExecutionId = "";
+
+        await sut.ExecuteStep(
+            new TestAsyncStreamReader<StepExecutionInput>([
+                MetadataInput(metadata)
+            ]),
+            response,
+            new TestServerCallContext());
+
+        response.Writes.Should().ContainSingle();
+        response.Writes.Single().Result.Error.ErrorType.Should().Be(WorkerErrorType.InvalidStepPackage);
+        targetsClient.DidNotReceive().ExecuteOnTargetAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ExecuteStep_WhenCommandTypeIsUnspecified_ReturnsInvalidStepPackage()
     {
         var targetsClient = Substitute.For<ITargetsControllerClient>();
@@ -153,6 +174,7 @@ public sealed class WorkerServiceTests
             new TestServerCallContext());
 
         var forwardedMetadata = targetRequestStream.Writes.Single().Metadata;
+        forwardedMetadata.ExecutionId.Should().Be("exec-1");
         forwardedMetadata.DeploymentId.Should().Be("deploy-1");
         forwardedMetadata.StepId.Should().Be("step-1");
         forwardedMetadata.StepName.Should().Be("Build");
@@ -172,7 +194,8 @@ public sealed class WorkerServiceTests
             {
                 Type = TCResultType.Log,
                 Timestamp = 123,
-                Message = "running"
+                Message = "running",
+                LogLevel = Targets.Communication.LogLevel.Warning
             },
             SuccessResult("done"));
         var targetsClient = Substitute.For<ITargetsControllerClient>();
@@ -190,9 +213,12 @@ public sealed class WorkerServiceTests
         response.Writes.Where(m => m.MessageCase == StepExecutionMessage.MessageOneofCase.Result)
             .Should().ContainSingle();
         response.Writes[0].Log.DeploymentId.Should().Be("deploy-1");
+        response.Writes[0].Log.ExecutionId.Should().Be("exec-1");
         response.Writes[0].Log.StepId.Should().Be("step-1");
+        response.Writes[0].Log.Level.Should().Be(WorkerLogLevel.Warning);
         response.Writes[0].Log.Message.Should().Be("running");
         response.Writes.Last().Result.Success.Summary.Should().Be("done");
+        response.Writes.Last().Result.Success.ExecutionId.Should().Be("exec-1");
         response.Writes.Last().Result.Success.DeploymentId.Should().Be("deploy-1");
         response.Writes.Last().Result.Success.StepId.Should().Be("step-1");
     }
@@ -221,6 +247,7 @@ public sealed class WorkerServiceTests
         response.Writes.Where(m => m.MessageCase == StepExecutionMessage.MessageOneofCase.Result)
             .Should().ContainSingle();
         response.Writes.Last().Result.Error.ErrorType.Should().Be(WorkerErrorType.TargetExecutionFailed);
+        response.Writes.Last().Result.Error.ExecutionId.Should().Be("exec-1");
         response.Writes.Last().Result.Error.DeploymentId.Should().Be("deploy-1");
         response.Writes.Last().Result.Error.StepId.Should().Be("step-1");
         response.Writes.Last().Result.Error.Message.Should().Be("target failed");
@@ -314,6 +341,7 @@ public sealed class WorkerServiceTests
         var metadata = new StepExecutionMetadata
         {
             DeploymentId = "deploy-1",
+            ExecutionId = "exec-1",
             ProcessId = "process-1",
             StepId = "step-1",
             StepName = "Build",
