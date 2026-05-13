@@ -22,6 +22,7 @@ message StepTargetMetadata {
   string target_id = 4;
   StepCommand command = 5;
   map<string, string> environment_variables = 6;
+  string execution_id = 7;
 }
 
 message StepCommand {
@@ -53,6 +54,8 @@ message ExecutionResult {
   ResultType type = 3;
   string message = 4;
   optional bytes data = 5;
+  string execution_id = 6;
+  optional LogLevel log_level = 7;
 }
 
 enum ResultType {
@@ -61,4 +64,12 @@ enum ResultType {
   RESULT_TYPE_PROGRESS = 2;
   RESULT_TYPE_SUCCESS = 3;
   RESULT_TYPE_ERROR = 4;
+}
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARNING = 3;
+  LOG_LEVEL_ERROR = 4;
 }

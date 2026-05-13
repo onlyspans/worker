@@ -8,6 +8,7 @@ using ProtoStepExecutionResult = Worker.Communication.StepExecutionResult;
 using TCArtifactChunk = Targets.Communication.ArtifactChunk;
 using TCCommandType = Targets.Communication.CommandType;
 using TCDeploymentInput = Targets.Communication.DeploymentInput;
+using TCLogLevel = Targets.Communication.LogLevel;
 using TCResultType = Targets.Communication.ResultType;
 using TCStepCommand = Targets.Communication.StepCommand;
 using TCStepTargetMetadata = Targets.Communication.StepTargetMetadata;
@@ -36,6 +37,7 @@ public sealed class WorkerService(
                 responseStream,
                 "",
                 "",
+                "",
                 ErrorType.InvalidStepPackage,
                 "First message must be StepExecutionMetadata",
                 ct);
@@ -48,6 +50,7 @@ public sealed class WorkerService(
         {
             await WriteErrorAsync(
                 responseStream,
+                metadata.ExecutionId,
                 metadata.DeploymentId,
                 metadata.StepId,
                 ErrorType.InvalidStepPackage,
@@ -56,17 +59,27 @@ public sealed class WorkerService(
             return;
         }
 
-        string? finalError = null;
-        string? successSummary = null;
-
         using var streamingCall = targetsClient.ExecuteOnTargetAsync(ct);
+        using var uploadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+        var responseTask = ReadTargetResponsesAsync(
+            streamingCall.ResponseStream,
+            responseStream,
+            metadata,
+            uploadCts,
+            ct);
+
+        Exception? uploadError = null;
+        var uploadCompleted = false;
 
         try
         {
+            uploadCts.Token.ThrowIfCancellationRequested();
             await streamingCall.RequestStream.WriteAsync(new TCDeploymentInput
             {
                 Metadata = new TCStepTargetMetadata
                 {
+                    ExecutionId = metadata.ExecutionId,
                     DeploymentId = metadata.DeploymentId,
                     StepId = metadata.StepId,
                     StepName = metadata.StepName,
@@ -74,15 +87,17 @@ public sealed class WorkerService(
                     Command = MapCommand(metadata.Command),
                     EnvironmentVariables = { metadata.ResolvedVariables }
                 }
-            }, ct);
+            });
 
-            await foreach (var input in requestStream.ReadAllAsync(ct))
+            await foreach (var input in requestStream.ReadAllAsync(uploadCts.Token))
             {
                 if (input.InputCase != WorkerStepExecutionInput.InputOneofCase.ArtifactChunk)
                 {
+                    uploadCts.Cancel();
                     await streamingCall.RequestStream.CompleteAsync();
                     await WriteErrorAsync(
                         responseStream,
+                        metadata.ExecutionId,
                         metadata.DeploymentId,
                         metadata.StepId,
                         ErrorType.InvalidStepPackage,
@@ -91,6 +106,7 @@ public sealed class WorkerService(
                     return;
                 }
 
+                uploadCts.Token.ThrowIfCancellationRequested();
                 await streamingCall.RequestStream.WriteAsync(new TCDeploymentInput
                 {
                     ArtifactChunk = new TCArtifactChunk
@@ -98,76 +114,70 @@ public sealed class WorkerService(
                         Data = input.ArtifactChunk.Data,
                         IsLast = input.ArtifactChunk.IsLast
                     }
-                }, ct);
+                });
             }
 
             await streamingCall.RequestStream.CompleteAsync();
+            uploadCompleted = true;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            uploadError = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            uploadError = ex;
+            logger.LogError(
+                ex,
+                "Failed to stream step package to target controller for execution {ExecutionId}, deployment {DeploymentId}, step {StepId}",
+                metadata.ExecutionId,
+                metadata.DeploymentId,
+                metadata.StepId);
+        }
+
+        TargetExecutionOutcome outcome;
+        try
+        {
+            outcome = await responseTask;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(
                 ex,
-                "Failed to stream step package to target controller for deployment {DeploymentId}, step {StepId}",
+                "Target execution stream failed for execution {ExecutionId}, deployment {DeploymentId}, step {StepId}",
+                metadata.ExecutionId,
                 metadata.DeploymentId,
                 metadata.StepId);
+            outcome = TargetExecutionOutcome.Failed(ex.Message);
+        }
 
+        if (outcome.ErrorMessage is not null)
+        {
             await WriteErrorAsync(
                 responseStream,
+                metadata.ExecutionId,
                 metadata.DeploymentId,
                 metadata.StepId,
-                ErrorType.ArtifactTransferFailed,
-                ex.Message,
+                ErrorType.TargetExecutionFailed,
+                outcome.ErrorMessage,
                 ct);
             return;
         }
 
-        try
+        if (uploadError is not null)
         {
-            await foreach (var targetMessage in streamingCall.ResponseStream.ReadAllAsync(ct))
-            {
-                switch (targetMessage.Type)
-                {
-                    case TCResultType.Error:
-                        finalError = targetMessage.Message;
-                        await WriteLogAsync(
-                            responseStream,
-                            metadata,
-                            targetMessage,
-                            MapResultTypeToLogLevel(targetMessage.Type),
-                            ct);
-                        break;
-                    case TCResultType.Success:
-                        successSummary = string.IsNullOrWhiteSpace(targetMessage.Message)
-                            ? "Step completed successfully"
-                            : targetMessage.Message;
-                        break;
-                    default:
-                        await WriteLogAsync(
-                            responseStream,
-                            metadata,
-                            targetMessage,
-                            MapResultTypeToLogLevel(targetMessage.Type),
-                            ct);
-                        break;
-                }
-
-                if (finalError is not null)
-                {
-                    break;
-                }
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogError(
-                ex,
-                "Target execution stream failed for deployment {DeploymentId}, step {StepId}",
+            await WriteErrorAsync(
+                responseStream,
+                metadata.ExecutionId,
                 metadata.DeploymentId,
-                metadata.StepId);
-            finalError = ex.Message;
+                metadata.StepId,
+                ErrorType.ArtifactTransferFailed,
+                uploadError.Message,
+                ct);
+            return;
         }
 
-        if (finalError is null)
+        if (uploadCompleted || outcome.SuccessSummary is not null)
         {
             await responseStream.WriteAsync(new StepExecutionMessage
             {
@@ -175,10 +185,11 @@ public sealed class WorkerService(
                 {
                     Success = new ProtoStepExecutionResult.Types.Success
                     {
+                        ExecutionId = metadata.ExecutionId,
                         DeploymentId = metadata.DeploymentId,
                         StepId = metadata.StepId,
                         CompletedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                        Summary = successSummary ?? "Step completed successfully"
+                        Summary = outcome.SuccessSummary ?? "Step completed successfully"
                     }
                 }
             }, ct);
@@ -187,15 +198,21 @@ public sealed class WorkerService(
 
         await WriteErrorAsync(
             responseStream,
+            metadata.ExecutionId,
             metadata.DeploymentId,
             metadata.StepId,
             ErrorType.TargetExecutionFailed,
-            finalError,
+            "Target execution did not complete",
             ct);
     }
 
     private static string? ValidateMetadata(StepExecutionMetadata metadata)
     {
+        if (string.IsNullOrWhiteSpace(metadata.ExecutionId))
+        {
+            return "Step execution_id is required";
+        }
+
         if (metadata.Command is null)
         {
             return "Step command is required";
@@ -245,6 +262,23 @@ public sealed class WorkerService(
         _ => TCCommandType.Unspecified
     };
 
+    private static ProtoLogLevel MapLogLevel(ExecutionResult targetMessage)
+    {
+        if (targetMessage.HasLogLevel)
+        {
+            return targetMessage.LogLevel switch
+            {
+                TCLogLevel.Debug => ProtoLogLevel.Debug,
+                TCLogLevel.Info => ProtoLogLevel.Info,
+                TCLogLevel.Warning => ProtoLogLevel.Warning,
+                TCLogLevel.Error => ProtoLogLevel.Error,
+                _ => ProtoLogLevel.Unspecified
+            };
+        }
+
+        return MapResultTypeToLogLevel(targetMessage.Type);
+    }
+
     private static ProtoLogLevel MapResultTypeToLogLevel(TCResultType type) => type switch
     {
         TCResultType.Error => ProtoLogLevel.Error,
@@ -253,6 +287,49 @@ public sealed class WorkerService(
         TCResultType.Success => ProtoLogLevel.Info,
         _ => ProtoLogLevel.Unspecified
     };
+
+    private static async Task<TargetExecutionOutcome> ReadTargetResponsesAsync(
+        IAsyncStreamReader<ExecutionResult> targetResponses,
+        IServerStreamWriter<StepExecutionMessage> responseStream,
+        StepExecutionMetadata metadata,
+        CancellationTokenSource uploadCts,
+        CancellationToken ct)
+    {
+        string? successSummary = null;
+
+        await foreach (var targetMessage in targetResponses.ReadAllAsync(ct))
+        {
+            switch (targetMessage.Type)
+            {
+                case TCResultType.Error:
+                    await WriteLogAsync(
+                        responseStream,
+                        metadata,
+                        targetMessage,
+                        MapLogLevel(targetMessage),
+                        ct);
+                    uploadCts.Cancel();
+                    return TargetExecutionOutcome.Failed(targetMessage.Message);
+
+                case TCResultType.Success:
+                    successSummary = string.IsNullOrWhiteSpace(targetMessage.Message)
+                        ? "Step completed successfully"
+                        : targetMessage.Message;
+                    break;
+
+                default:
+                    await WriteLogAsync(
+                        responseStream,
+                        metadata,
+                        targetMessage,
+                        MapLogLevel(targetMessage),
+                        ct);
+                    break;
+            }
+        }
+
+        return TargetExecutionOutcome.Succeeded(successSummary);
+    }
 
     private static async Task WriteLogAsync(
         IServerStreamWriter<StepExecutionMessage> responseStream,
@@ -265,6 +342,7 @@ public sealed class WorkerService(
         {
             Log = new LogChunk
             {
+                ExecutionId = metadata.ExecutionId,
                 DeploymentId = metadata.DeploymentId,
                 StepId = metadata.StepId,
                 Timestamp = targetMessage.Timestamp,
@@ -277,6 +355,7 @@ public sealed class WorkerService(
 
     private static async Task WriteErrorAsync(
         IServerStreamWriter<StepExecutionMessage> responseStream,
+        string executionId,
         string deploymentId,
         string stepId,
         ErrorType errorType,
@@ -289,6 +368,7 @@ public sealed class WorkerService(
             {
                 Error = new ProtoStepExecutionResult.Types.Error
                 {
+                    ExecutionId = executionId,
                     DeploymentId = deploymentId,
                     StepId = stepId,
                     ErrorType = errorType,
@@ -296,5 +376,11 @@ public sealed class WorkerService(
                 }
             }
         }, ct);
+    }
+
+    private sealed record TargetExecutionOutcome(string? SuccessSummary, string? ErrorMessage)
+    {
+        public static TargetExecutionOutcome Succeeded(string? summary) => new(summary, null);
+        public static TargetExecutionOutcome Failed(string message) => new(null, message);
     }
 }
